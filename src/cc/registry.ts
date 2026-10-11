@@ -46,6 +46,15 @@ export function procStart(pid: number = process.pid): string | undefined {
   }
 }
 
+/** CC-style pid namespace id from /proc/self/ns/pid ("pid:[4026531836]"). */
+export function procNsPid(): string | undefined {
+  try {
+    return readFileSync("/proc/self/ns/pid", "utf-8").trim();
+  } catch {
+    return undefined;
+  }
+}
+
 export function machineIdHash(): string | undefined {
   try {
     return createHash("md5").update(readFileSync("/etc/machine-id", "utf-8").trim()).digest("hex");

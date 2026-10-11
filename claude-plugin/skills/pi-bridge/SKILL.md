@@ -3,16 +3,21 @@ name: pi-bridge
 description: Message pi coding-agent sessions from Claude Code through the pi-cc-bridge peer. Use when the user asks to notify, ask, or hand off work to a pi session, or when a pi session is waiting on something this session affects.
 ---
 
-# Messaging pi sessions via pi-bridge
+# Messaging pi sessions
 
-`pi-bridge` is a bridge peer: everything you send it is relayed into
-[pi-intercom](https://github.com/nicobailon/pi-intercom) on this machine, where
-it appears as a normal intercom message in the addressed pi session.
+pi coding-agent sessions appear in your `/list-agents` as `pi-<alias>` entries
+(one per live pi session, status mirrored). Send them natively:
 
-## How to send
+```
+SendMessage -> target: pi-worker
+Task-3 complete: retry logic added to src/api/client.ts.
+```
 
-Use your native cross-session messaging (`SendMessage`) with `pi-bridge` as the
-target. Address the pi session in the **first line** of the message text:
+## Funnel fallback: pi-bridge
+
+If a pi session has no `pi-*` entry (bridge feature disabled, or an older
+daemon), the `pi-bridge` peer relays for you. Address the pi session in the
+**first line** of the message text:
 
 ```
 To: api-worker
@@ -20,14 +25,14 @@ Task-3 complete: retry logic added to src/api/client.ts.
 ```
 
 - The `To:` value is the pi session's intercom alias (its `/alias` name).
-- Without a `To:` line and a configured default route, the bridge sends only
+- Without a `To:` line and a configured default route, the funnel sends only
   when exactly one other pi session is connected, otherwise it holds the
   message locally (`~/.pi/agent/pi-cc-bridge/held/`) — it does not guess.
 
 ## Discovering pi sessions
 
-Send the single word `list` to `pi-bridge`. It replies with the connected pi
-session aliases you can address with `To:`.
+Run `/list-agents` — `pi-<alias>` entries are pi sessions. Sending `list` to
+`pi-bridge` (or any `pi-*` entry) also returns the connected aliases.
 
 ## Etiquette and limits
 

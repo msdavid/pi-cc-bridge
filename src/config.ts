@@ -11,6 +11,10 @@ export interface BridgeConfig {
   pollMs: number;
   /** Pi session (alias or name) that receives CC messages without a `To:` header. */
   routeTo?: string;
+  /** Spawn one holder child per live pi session so CC sees `pi-<alias>` natively. */
+  nativeEntries: boolean;
+  /** Upper bound on concurrent holder children (safety). */
+  maxHolders: number;
   /** Daemon log verbosity. */
   logLevel: "quiet" | "normal" | "debug";
   /** Overrides (tests). */
@@ -23,6 +27,8 @@ export const DEFAULT_CONFIG: BridgeConfig = {
   enabled: true,
   peerName: "pi-bridge",
   pollMs: 2_000,
+  nativeEntries: true,
+  maxHolders: 16,
   logLevel: "normal",
 };
 
@@ -44,6 +50,8 @@ export function loadConfig(stateDir: string): BridgeConfig {
       ...(typeof raw.peerName === "string" && raw.peerName.trim() ? { peerName: raw.peerName.trim() } : {}),
       ...(Number.isFinite(raw.pollMs) && raw.pollMs >= 250 ? { pollMs: raw.pollMs } : {}),
       ...(typeof raw.routeTo === "string" && raw.routeTo.trim() ? { routeTo: raw.routeTo.trim() } : { routeTo: undefined }),
+      ...(typeof raw.nativeEntries === "boolean" ? { nativeEntries: raw.nativeEntries } : {}),
+      ...(Number.isFinite(raw.maxHolders) && raw.maxHolders >= 0 ? { maxHolders: raw.maxHolders } : {}),
       ...(raw.logLevel === "quiet" || raw.logLevel === "normal" || raw.logLevel === "debug" ? { logLevel: raw.logLevel } : {}),
       ...(typeof raw.agentDir === "string" ? { agentDir: raw.agentDir } : {}),
       ...(typeof raw.ccSessionsDir === "string" ? { ccSessionsDir: raw.ccSessionsDir } : {}),

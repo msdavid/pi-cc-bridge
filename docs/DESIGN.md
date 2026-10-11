@@ -139,15 +139,32 @@ Recommendation for CC worker sessions that should accept pi traffic unattended:
 | pi→CC text | wrapped in `<cross-session-message>` exactly like a native CC sender |
 | CC→pi text | wrapper stripped, replaced with a `Message from Claude Code session <name>` prefix |
 
-### CC → pi routing
+### CC → pi routing — native entries (default)
 
-Inbound text is routed by, in order:
+With `nativeEntries: true` the daemon spawns one **holder child** per live pi session.
+Each child binds its own CC inbox socket and writes its own registry record named
+`pi-<alias>`, so `/list-agents` shows every pi session natively and CC `SendMessage`s it
+directly — no `To:` header needed. Holder records carry `kind: "bridge"` and mirror the
+pi session's status (busy/idle) and alias renames, pushed from the daemon over private
+IPC (`~/.pi/agent/pi-cc-bridge/holders-ipc.sock`).
 
-1. A leading `To: <alias>` line in the message text.
-2. `routeTo` in config (a pi session alias).
-3. If the roster holds exactly one other intercom session, that session.
-4. Otherwise held in a local queue (`~/.pi/agent/pi-cc-bridge/held/`) and logged — never
-   guessed broadly.
+Children are deliberately dumb socket-holders with **no broker connection**: they forward
+frames to the daemon, which relays via the *sending CC session's own* synthetic peer
+connection — attribution stays `Message from Claude Code session <name>` and no extra
+intercom sessions are created. A watchdog makes children self-clean (registry record +
+socket) if the daemon dies. Prebuilt bundle `dist/holder.mjs` (plain node, ~53 MB RSS)
+is preferred over the tsx fallback (~82 MB); `npm run build` regenerates it,
+`prepublishOnly` enforces it.
+
+Routing inside a holder entry: a `To: <alias>` header is honored for cross-routing;
+otherwise the message belongs to that pi session. `list` replies with the roster.
+Unroutable funnel messages are held in `~/.pi/agent/pi-cc-bridge/held/` — never guessed.
+
+### Funnel fallback (kept for compatibility)
+
+The masquerade record `peerName` (default `pi-bridge`) remains: `SendMessage` to it with a
+leading `To: <alias>` line, or `routeTo` in config, or — when exactly one other pi session
+is connected — that session.
 
 ## Runtime layout
 

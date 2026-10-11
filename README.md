@@ -10,9 +10,10 @@ pi sessions ⇄ pi-intercom broker ⇄ [pi-cc-bridge daemon] ⇄ CC inbox socket
 
 - **From pi**: every live Claude Code session shows up in `intercom list` as a
   `claude:<name>` peer. Message it with the ordinary intercom tool.
-- **From Claude Code**: the bridge appears in `/list-agents` as `pi-bridge`.
-  `SendMessage` to it with a `To: <pi-alias>` first line (or send `list` to
-  discover pi sessions).
+- **From Claude Code**: every live pi session shows up in `/list-agents` as a
+  `pi-<alias>` session (status mirrored). `SendMessage` it directly — or use
+  the `pi-bridge` funnel with a `To: <pi-alias>` first line (or send `list`
+  to discover pi sessions).
 
 Both wire directions were verified live against Claude Code 2.1.296 and
 pi-intercom 0.17.0; see `docs/DESIGN.md` for the captured protocol and
@@ -69,6 +70,7 @@ Validate: `claude plugin validate ~/projects/pi-cc-bridge/claude-plugin`.
 
 ```bash
 npm install
+npm run build        # dist/holder.mjs — plain-node holder children (~53MB vs ~82MB)
 npm start            # or: bin/pi-cc-bridge.mjs
 ```
 
