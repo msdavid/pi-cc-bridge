@@ -600,10 +600,16 @@ export class Bridge {
 
     let holder = this.holders.get(sender.id);
     if (!holder) {
-      // Spawn now; a beat later the reply path exists. This message still goes
-      // out via the funnel so the first send is never lost.
+      // First contact: give the holder a moment to bind so the message can go
+      // out natively (from pi-<alias>, reply-addressable). If it is still not
+      // up in time, fall back to the funnel — the send is never lost.
       this.reconcileHolders();
-      holder = this.holders.get(sender.id);
+      const deadline = Date.now() + 2_000;
+      while (!holder && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        holder = this.holders.get(sender.id);
+        if (holder?.socketPath) break;
+      }
     }
 
     const native = holder?.socketPath !== undefined;
@@ -614,7 +620,7 @@ export class Bridge {
         senderSocketPath: native ? holder!.socketPath! : ownSocketPath(this.paths),
         senderName: native ? `pi-${holder!.alias}` : this.config.peerName,
         senderMode: this.config.piSenderMode,
-        text: native ? text : `[from pi session ${label}; reply with first line "To: ${label}"]\n${text}`,
+        text: native ? text : `[from pi session ${senderLabel(sender)}; reply with first line "To: ${label}"]\n${text}`,
         msgId: event.message.id,
         targetSessionId: peer.cc.sessionId, // CC drops it if the pid was recycled (P2-9)
       });
@@ -914,6 +920,14 @@ function peerNameFor(fromName: string | undefined, fromSocket: string | undefine
     if (peer.cc.messagingSocketPath === bare) return ccNameFor(peer);
   }
   return fromName ?? "unknown";
+}
+
+/** Human label for a pi session; runtime fallback aliases read as strangers. */
+function senderLabel(sender: { name?: string; cwd?: string; id: string }): string {
+  const name = sender.name?.trim();
+  if (name && !name.startsWith("subagent-chat-")) return name;
+  const dir = sender.cwd?.split("/").filter(Boolean).pop() ?? "unknown";
+  return `unnamed pi session in ${dir} (${sender.id.slice(0, 8)}; reachable via "To: ${name ?? sender.id.slice(0, 8)}")`;
 }
 
 function ccNameFor(peer: Peer): string {
