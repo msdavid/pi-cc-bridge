@@ -1,6 +1,6 @@
 import { spawn, ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -56,6 +56,7 @@ interface HolderState {
 }
 
 const HOLDER_LINE = 10; // \n
+const MAX_LOG_BYTES = 16 * 1024 * 1024; // truncate marker beyond this; keeps runaway logging bounded
 const MAX_RELAY_BYTES = 900 * 1024; // below CC's ~1M-char refusal (P1-7)
 const SPAWN_COOLDOWN_MS = 10_000;
 const MAX_CRASHES = 5;
@@ -915,13 +916,23 @@ export async function runDaemon(argv: string[] = process.argv.slice(2)): Promise
   const stateDir = bridgeStateDir(argv[0]);
   const config = loadConfig(stateDir);
   const logFile = join(stateDir, "daemon.log");
+  let stdoutBroken = false;
   const log = (msg: string) => {
+    // Logging must never throw — an EPIPE on a dead parent's stdout pipe once
+    // looped through uncaughtException and wrote 19GB/hour to disk.
     const line = `${new Date().toISOString()} ${msg}`;
-    if (config.logLevel !== "quiet") process.stdout.write(`${line}\n`);
     try {
+      if (statSync(logFile).size > MAX_LOG_BYTES) appendFileSync(logFile, `--- log truncated ${new Date().toISOString()} ---\n`);
       appendFileSync(logFile, `${line}\n`);
     } catch {
-      /* best effort */
+      /* disk full or gone: drop the line, keep running */
+    }
+    if (!stdoutBroken && config.logLevel !== "quiet") {
+      try {
+        process.stdout.write(`${line}\n`);
+      } catch {
+        stdoutBroken = true; // pipe died: stop attempting, never throw
+      }
     }
   };
 
@@ -953,7 +964,14 @@ export async function runDaemon(argv: string[] = process.argv.slice(2)): Promise
   };
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));
-  process.on("uncaughtException", error => log(`uncaught: ${error.stack ?? error.message}`));
+  process.on("uncaughtException", error => {
+    // One line, best-effort; must never recurse through logging.
+    try {
+      log(`uncaught: ${error.stack ?? error.message}`);
+    } catch {
+      /* drop */
+    }
+  });
 
   try {
     await bridge.start();
