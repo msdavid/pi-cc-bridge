@@ -99,7 +99,9 @@ See `docs/DESIGN.md` for the full model.
 
 ## Status
 
-MVP. Known limits: CC session renames while the daemon runs are not re-synced;
+MVP. **Publish is deliberately on hold**: the package is in an extensive-use
+trial on this machine first. Do not `npm publish` until that decision is made.
+Install locally for trial use (see above). Known limits: CC session renames while the daemon runs are not re-synced;
 cross-machine CC messaging (Remote Control relay) is out of scope; the pi→CC
 direction inherits CC's inbound controls verbatim (bypass-mode CC sessions
 will hold `prompting`-class messages for user approval — set
