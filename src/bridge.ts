@@ -182,14 +182,19 @@ export class Bridge {
     // protocol assumptions may be stale — say so loudly, once each (P1-6/P2-10).
     for (const { record, file } of records) {
       if (record.kind === "bridge") continue;
-      const shapeKey = `shape-${Object.keys(record).sort().join(",")}`;
-      this.logOnce(
-        shapeKey,
-        `unrecognized CC record shape (${file}): fields [${Object.keys(record).sort().join(", ")}] — check protocol assumptions`,
-      );
+      const shapeKey = Object.keys(record).sort().join(",");
+      if (!this.seenRecordShapes.has(shapeKey)) {
+        // First sight of a shape is the baseline; warn only when it CONFLICTS
+        // with a shape we already accepted (schema drift), not on first boot.
+        if (this.seenRecordShapes.size > 0) {
+          this.logOnce(`shape-${shapeKey}`, `unrecognized CC record shape (${file}): fields [${shapeKey}] — check protocol assumptions`);
+        }
+        this.seenRecordShapes.add(shapeKey);
+      }
       if (record.version && !this.knownCcVersions.has(record.version)) {
+        const first = this.knownCcVersions.size === 0;
         this.knownCcVersions.add(record.version);
-        this.log(`CC version ${record.version} seen for the first time — wire format captured on 2.1.296; verify before relying on it`);
+        if (!first) this.log(`CC version ${record.version} seen alongside other versions — wire format captured on 2.1.296; verify before relying on it`);
       }
     }
     const seen = new Set<string>();
@@ -324,6 +329,7 @@ export class Bridge {
   private pollTick = 0;
   private missCount = new Map<string, number>();
   private knownCcVersions = new Set<string>();
+  private seenRecordShapes = new Set<string>();
 
   /** One connection is authoritative for roster events — process broadcasts once (P1-3). */
   private rosterClient(): BrokerClient | undefined {
@@ -965,7 +971,13 @@ export async function runDaemon(argv: string[] = process.argv.slice(2)): Promise
     // looped through uncaughtException and wrote 19GB/hour to disk.
     const line = `${new Date().toISOString()} ${msg}`;
     try {
-      if (statSync(logFile).size > MAX_LOG_BYTES) {
+      let size = 0;
+      try {
+        size = statSync(logFile).size; // missing file is fine: append creates it
+      } catch {
+        size = 0;
+      }
+      if (size > MAX_LOG_BYTES) {
         try {
           unlinkSync(`${logFile}.1`);
         } catch {
