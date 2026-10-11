@@ -1,0 +1,46 @@
+{
+  "name": "pi-cc-bridge",
+  "version": "0.1.0",
+  "description": "Bridge pi-intercom sessions and Claude Code cross-session messaging: pi sessions and Claude Code sessions appear as peers to each other.",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi-coding-agent",
+    "pi-intercom",
+    "claude-code",
+    "cross-session-messaging",
+    "bridge"
+  ],
+  "files": [
+    "extensions",
+    "src",
+    "bin",
+    "claude-plugin",
+    "docs",
+    "README.md"
+  ],
+  "pi": {
+    "extensions": ["./extensions/index.ts"]
+  },
+  "bin": {
+    "pi-cc-bridge": "./bin/pi-cc-bridge.mjs"
+  },
+  "scripts": {
+    "start": "tsx src/cli.ts",
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "tsx": "^4.20.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@types/node": "^24",
+    "typescript": "^5"
+  }
+}

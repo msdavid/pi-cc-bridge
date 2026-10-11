@@ -1,0 +1,9 @@
+{
+  "name": "pi-cc-bridge",
+  "displayName": "pi-cc-bridge",
+  "version": "0.1.0",
+  "description": "Message pi coding-agent sessions through the pi-cc-bridge peer: pi sessions appear in /list-agents as pi-bridge.",
+  "author": { "name": "mauro" },
+  "license": "MIT",
+  "keywords": ["pi", "pi-intercom", "bridge", "cross-session"]
+}
