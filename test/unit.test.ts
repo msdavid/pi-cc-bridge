@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseInboundLine, buildOutboundLine, unwrapCrossSessionMessage } from "../src/cc/protocol.ts";
 import { procStart } from "../src/cc/registry.ts";
-import { aliasExposed, allocateHolderAlias, matchTarget, parseToHeader, routeFunnel, toCcStatus } from "../src/routing.ts";
+import { aliasExposed, allocateHolderAlias, derivedCcName, isFallbackAlias, matchTarget, parseToHeader, routeFunnel, toCcStatus } from "../src/routing.ts";
 import { RateLimiter } from "../src/ratelimit.ts";
 import { createFrameReader } from "../src/intercom/framing.ts";
 
@@ -146,4 +146,29 @@ test("routeFunnel: explicit addresses hold, never reroute (critic P1-8 table)", 
   assert.deepEqual(routeFunnel("plain", [{ id: "cc-1" }, { id: "only", name: "solo" }], undefined), { target: "only", text: "plain" });
   assert.deepEqual(routeFunnel("plain", [{ id: "cc-1" }], undefined), { target: undefined, text: "plain" });
   assert.deepEqual(routeFunnel("plain", roster, undefined), { target: undefined, text: "plain" }); // ambiguous
+});
+
+test("derivedCcName: CC's derived-name convention (basename + 2 hex), stable", () => {
+  const a = derivedCcName("11111111-1111-1111-1111-111111111111", "/home/mauro/projects/systemfix");
+  const b = derivedCcName("11111111-1111-1111-1111-111111111111", "/home/mauro/projects/systemfix");
+  assert.equal(a, b, "deterministic across calls/restarts");
+  assert.match(a, /^systemfix-[0-9a-f]{2}$/, "basename + exactly 2 lowercase hex");
+  assert.equal(derivedCcName("22222222-2222-2222-2222-222222222222", "/home/mauro/projects/tmp"), derivedCcName("22222222-2222-2222-2222-222222222222", "/home/mauro/projects/tmp"));
+});
+
+test("allocateHolderAlias: unnamed sessions get the CC-derived name, fallback aliases never shown", () => {
+  assert.equal(isFallbackAlias("subagent-chat-01a12935-b66d"), true);
+  const alias = allocateHolderAlias({
+    session: { id: "abc", name: "subagent-chat-01a12935-b66d-7104" },
+    holders: [],
+    ccPiNames: [],
+    peerName: "pi-bridge",
+    unnamedBase: derivedCcName("abc", "/home/mauro/projects/systemfix"),
+  });
+  assert.match(alias, /^systemfix-[0-9a-f]{2}$/, "unnamed session takes the CC-derived base");
+  // named sessions are untouched
+  assert.equal(
+    allocateHolderAlias({ session: { id: "x", name: "planner" }, holders: [], ccPiNames: [], peerName: "pi-bridge" }),
+    "planner",
+  );
 });

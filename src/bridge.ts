@@ -14,7 +14,7 @@ import { BrokerClient, IntercomMessage, BrokerSessionInfo } from "./intercom/cli
 import { BridgeConfig, bridgeStateDir, loadConfig } from "./config.ts";
 import { randomUUID as _uuid } from "node:crypto";
 void _uuid;
-import { allocateHolderAlias, aliasExposed, matchTarget, parseToHeader, routeFunnel, toCcStatus } from "./routing.ts";
+import { allocateHolderAlias, aliasExposed, derivedCcName, isFallbackAlias, matchTarget, parseToHeader, routeFunnel, toCcStatus } from "./routing.ts";
 import { RateLimiter } from "./ratelimit.ts";
 
 /**
@@ -410,7 +410,8 @@ export class Bridge {
   }
 
   private isExposed(session: BrokerSessionInfo): boolean {
-    const alias = session.name?.trim() || `sid-${session.id.slice(0, 8)}`;
+    const raw = session.name?.trim();
+    const alias = raw && !isFallbackAlias(raw) ? raw : derivedCcName(session.id, session.cwd);
     return aliasExposed(alias, this.config.expose);
   }
 
@@ -925,9 +926,8 @@ function peerNameFor(fromName: string | undefined, fromSocket: string | undefine
 /** Human label for a pi session; runtime fallback aliases read as strangers. */
 function senderLabel(sender: { name?: string; cwd?: string; id: string }): string {
   const name = sender.name?.trim();
-  if (name && !name.startsWith("subagent-chat-")) return name;
-  const dir = sender.cwd?.split("/").filter(Boolean).pop() ?? "unknown";
-  return `unnamed pi session in ${dir} (${sender.id.slice(0, 8)}; reachable via "To: ${name ?? sender.id.slice(0, 8)}")`;
+  if (name && !isFallbackAlias(name)) return name;
+  return `pi session ${derivedCcName(sender.id, sender.cwd)}`;
 }
 
 function ccNameFor(peer: Peer): string {

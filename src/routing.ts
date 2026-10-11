@@ -45,6 +45,24 @@ export function toCcStatus(status: string | undefined): "idle" | "busy" {
   return "busy";
 }
 
+import { createHash } from "node:crypto";
+import { basename } from "node:path";
+
+/**
+ * CC's own derived-name convention (captured from live records:
+ * nameSource "derived" → `<basename(cwd)>-<2 lowercase hex>`), applied to pi
+ * sessions without a /alias so CC never sees machine-UUID strangers.
+ */
+export function derivedCcName(sessionId: string, cwd: string | undefined): string {
+  const dir = cwd?.split("/").filter(Boolean).pop() ?? "session";
+  return `${dir}-${createHash("md5").update(sessionId).digest("hex").slice(0, 2)}`;
+}
+
+/** pi-intercom's runtime fallback alias prefix — never show it to CC. */
+export function isFallbackAlias(name: string): boolean {
+  return name.startsWith("subagent-chat-");
+}
+
 /**
  * Stable holder-alias allocation (P1-2): a session keeps its alias across
  * presence storms, the session's own holder never counts as a collision, and
@@ -55,8 +73,14 @@ export function allocateHolderAlias(params: {
   holders: { piSessionId: string; alias: string }[];
   ccPiNames: string[]; // bare aliases claimed by CC-namespace `pi-*` records
   peerName: string; // funnel name, e.g. "pi-bridge"
+  /** Base name for sessions without a usable alias (CC-derived convention). */
+  unnamedBase?: string;
 }): string {
-  const base = (params.session.name?.trim() || `sid-${params.session.id.slice(0, 8)}`).replace(/[^\w.-]/g, "-");
+  const rawName = params.session.name?.trim();
+  const base = (rawName && !isFallbackAlias(rawName)
+    ? rawName
+    : params.unnamedBase ?? `sid-${params.session.id.slice(0, 8)}`
+  ).replace(/[^\w.-]/g, "-");
   const taken = new Set<string>([
     ...params.holders.filter(h => h.piSessionId !== params.session.id).map(h => h.alias),
     ...params.ccPiNames,
