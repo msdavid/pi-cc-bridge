@@ -14,7 +14,7 @@ import { BrokerClient, IntercomMessage, BrokerSessionInfo } from "./intercom/cli
 import { BridgeConfig, bridgeStateDir, loadConfig } from "./config.ts";
 import { randomUUID as _uuid } from "node:crypto";
 void _uuid;
-import { aliasExposed, matchTarget, parseToHeader, toCcStatus } from "./routing.ts";
+import { allocateHolderAlias, aliasExposed, matchTarget, parseToHeader, routeFunnel, toCcStatus } from "./routing.ts";
 import { RateLimiter } from "./ratelimit.ts";
 
 /**
@@ -56,7 +56,7 @@ interface HolderState {
 }
 
 const HOLDER_LINE = 10; // \n
-const MAX_LOG_BYTES = 16 * 1024 * 1024; // truncate marker beyond this; keeps runaway logging bounded
+const MAX_LOG_BYTES = 16 * 1024 * 1024; // rotate to daemon.log.1; keeps runaway logging bounded
 const MAX_RELAY_BYTES = 900 * 1024; // below CC's ~1M-char refusal (P1-7)
 const SPAWN_COOLDOWN_MS = 10_000;
 const MAX_CRASHES = 5;
@@ -129,12 +129,14 @@ export class Bridge {
       status: "idle",
       statusUpdatedAt: Date.now(),
     };
-    writeOwnRecord(record, this.paths);
+    // Bind first, then publish the record: CC preflights the socket's peer pid,
+    // so a record must never point at a socket that is not listening yet (P3-7).
     this.inbox = await startCcInbox({
       socketPath,
       onFrame: frame => void this.onCcFrame(frame),
       onError: error => this.log(`inbox: ${error.message}`),
     });
+    writeOwnRecord(record, this.paths);
     this.log(`bridge inbox at ${socketPath}, registry record written`);
 
     this.startIpcServer();
@@ -176,6 +178,20 @@ export class Bridge {
     const records = listRecordsSync(this.paths);
     selfCheckProcStart(records, this.log);
     gcOwnStaleRecords(process.pid, this.paths); // dead-pid bridge records (crashed holders) — periodic
+    // Drift detection: an unfamiliar record shape or CC version means our
+    // protocol assumptions may be stale — say so loudly, once each (P1-6/P2-10).
+    for (const { record, file } of records) {
+      if (record.kind === "bridge") continue;
+      const shapeKey = `shape-${Object.keys(record).sort().join(",")}`;
+      this.logOnce(
+        shapeKey,
+        `unrecognized CC record shape (${file}): fields [${Object.keys(record).sort().join(", ")}] — check protocol assumptions`,
+      );
+      if (record.version && !this.knownCcVersions.has(record.version)) {
+        this.knownCcVersions.add(record.version);
+        this.log(`CC version ${record.version} seen for the first time — wire format captured on 2.1.296; verify before relying on it`);
+      }
+    }
     const seen = new Set<string>();
     const usedNames = new Set<string>([this.config.peerName, ...[...this.holders.values()].map(h => `pi-${h.alias}`)]);
 
@@ -209,10 +225,10 @@ export class Bridge {
         continue;
       }
 
-      const baseName = record.name?.trim() ? `claude:${record.name.trim()}` : `claude-pid-${record.pid}`;
+      const baseName = record.name?.trim() ? `claude:${record.name.trim()}` : `claude:pid-${record.pid}`;
       let name = baseName;
-      let suffix = 0;
-      while (usedNames.has(name)) name = `${baseName}#${++suffix}`;
+      let suffix = 1;
+      while (usedNames.has(name)) name = `${baseName}#${++suffix}`; // first collision is #2
       usedNames.add(name);
 
       const sessionId = `cc-${record.sessionId}`;
@@ -276,10 +292,26 @@ export class Bridge {
 
     for (const [ccSessionId, peer] of this.peers) {
       if (!seen.has(ccSessionId)) {
-        // Retire only on confirmed absence: dead pid or two consecutive misses.
-        peer.client.close();
-        this.peers.delete(ccSessionId);
-        this.log(`peer retired: ${peer.name}`);
+        // Torn reads and pid-reuse windows must not flap peers: retire only on
+        // a confirmed-dead pid or two consecutive misses (P1-5).
+        if (!isPidAlive(peer.cc.pid)) {
+          peer.client.close();
+          this.peers.delete(ccSessionId);
+          this.missCount.delete(ccSessionId);
+          this.log(`peer retired (pid dead): ${peer.name}`);
+          continue;
+        }
+        const misses = (this.missCount.get(ccSessionId) ?? 0) + 1;
+        if (misses >= 2) {
+          peer.client.close();
+          this.peers.delete(ccSessionId);
+          this.missCount.delete(ccSessionId);
+          this.log(`peer retired (2 consecutive misses): ${peer.name}`);
+        } else {
+          this.missCount.set(ccSessionId, misses);
+        }
+      } else {
+        this.missCount.delete(ccSessionId);
       }
     }
 
@@ -290,6 +322,8 @@ export class Bridge {
     this.reconcileHolders();
   }
   private pollTick = 0;
+  private missCount = new Map<string, number>();
+  private knownCcVersions = new Set<string>();
 
   /** One connection is authoritative for roster events — process broadcasts once (P1-3). */
   private rosterClient(): BrokerClient | undefined {
@@ -628,7 +662,7 @@ export class Bridge {
       text = `${text.slice(0, 4000)}\n…[truncated; full text: ${file}]`;
     }
 
-    if (text.trim() === "list") {
+    if (text.trim() === "/list") {
       const names = [...this.holders.values()].map(h => `- pi-${h.alias}`);
       void this.sendHolderReply(holder, {
         toSocket: fromSocket,
@@ -727,7 +761,27 @@ export class Bridge {
     await this.noticeToCc(toSocket, holder.alias, msg.text, typeof msg.msgId === "string" ? msg.msgId : undefined);
   }
 
+  /**
+   * Reply-target validation (P2-1): the daemon only ever posts to sockets that
+   * belong to a live CC session record or one of our own holders. A forged
+   * `from` in message content can never aim the bridge at an arbitrary socket.
+   */
+  private isAllowedReplySocket(socketPath: string): boolean {
+    const bare = socketPath.startsWith("uds:") ? socketPath.slice(4) : socketPath;
+    if (!bare.startsWith(ccSocketDir(this.paths) + "/")) return false; // only CC's runtime dir
+    for (const peer of this.peers.values()) if (peer.cc.messagingSocketPath === bare) return true;
+    for (const holder of this.holders.values()) if (holder.socketPath === bare) return true;
+    for (const { record } of listRecordsSync(this.paths)) {
+      if (record.kind !== "bridge" && record.messagingSocketPath === bare && isPidAlive(record.pid)) return true;
+    }
+    return false;
+  }
+
   private async noticeToCc(socketPath: string, alias: string, text: string, msgId?: string): Promise<void> {
+    if (!this.isAllowedReplySocket(socketPath)) {
+      this.log(`refused reply to unvalidated socket ${socketPath}`);
+      return;
+    }
     try {
       await postToCcInbox({
         socketPath,
@@ -768,7 +822,7 @@ export class Bridge {
     const fromSocket = frame.line.from ?? frame.meta.from;
     const fromName = frame.meta.fromName ?? fromSocket ?? "claude-session";
 
-    if (frame.text.trim() === "list") {
+    if (frame.text.trim() === "/list") {
       const names = [...this.holders.values()].map(h => `- pi-${h.alias}`);
       try {
         await postToCcInbox({
@@ -788,7 +842,7 @@ export class Bridge {
       return;
     }
 
-    const { target, text } = this.resolveRoute(frame.text);
+    const { target, text } = routeFunnel(frame.text, [...this.roster.values()], this.config.routeTo);
     if (!target) {
       const file = this.hold(frame.meta ? "funnel-unrouted" : "funnel-unrouted", { fromName, text, msgId: frame.line.msg_id });
       this.log(`cc message from ${fromName} held (no route): ${file}`);
@@ -827,26 +881,6 @@ export class Bridge {
       this.hold("funnel-send-failed", { fromName, text, msgId, error: (error as Error).message });
       this.log(`funnel relay to ${target} failed: ${(error as Error).message}`);
     }
-  }
-
-  /**
-   * Route resolution: explicit `To:` header (case-sensitive, single line;
-   * unknown target → hold, never reroute), then `routeTo`, then a single
-   * other pi session. (P1-8)
-   */
-  private resolveRoute(text: string): { target?: string; text: string } {
-    const parsed = parseToHeader(text);
-    if (parsed) {
-      const hit = matchTarget(parsed.target, [...this.roster.values()]);
-      if (!hit) return { target: undefined, text }; // explicit address: hold, never reroute
-      return { target: hit, text: parsed.rest };
-    }
-    if (this.config.routeTo) {
-      const hit = matchTarget(this.config.routeTo, [...this.roster.values()]);
-      if (hit) return { target: hit, text };
-    }
-    const others = [...this.roster.values()].filter(s => !s.id.startsWith("cc-"));
-    return { target: others.length === 1 ? others[0].id : undefined, text };
   }
 
   private findPeerBySender(senderSocket: string | undefined): Peer | undefined {
@@ -913,7 +947,16 @@ export function tryLock(lockPath: string, log: (m: string) => void): boolean {
 
 /** CLI entry: run the bridge until signalled. */
 export async function runDaemon(argv: string[] = process.argv.slice(2)): Promise<void> {
-  const stateDir = bridgeStateDir(argv[0]);
+  // P3-1: explicit flags only — a bare positional once created `./--help/`.
+  let agentDirOverride: string | undefined;
+  for (const arg of argv) {
+    if (arg.startsWith("--agent-dir=")) agentDirOverride = arg.slice("--agent-dir=".length);
+    else {
+      process.stderr.write(`pi-cc-bridge: unknown argument ${arg} (usage: pi-cc-bridge [--agent-dir=<path>])\n`);
+      process.exit(2);
+    }
+  }
+  const stateDir = bridgeStateDir(agentDirOverride);
   const config = loadConfig(stateDir);
   const logFile = join(stateDir, "daemon.log");
   let stdoutBroken = false;
@@ -922,7 +965,14 @@ export async function runDaemon(argv: string[] = process.argv.slice(2)): Promise
     // looped through uncaughtException and wrote 19GB/hour to disk.
     const line = `${new Date().toISOString()} ${msg}`;
     try {
-      if (statSync(logFile).size > MAX_LOG_BYTES) appendFileSync(logFile, `--- log truncated ${new Date().toISOString()} ---\n`);
+      if (statSync(logFile).size > MAX_LOG_BYTES) {
+        try {
+          unlinkSync(`${logFile}.1`);
+        } catch {
+          /* first rotation */
+        }
+        renameSync(logFile, `${logFile}.1`); // rotate: keep one generation, stay bounded
+      }
       appendFileSync(logFile, `${line}\n`);
     } catch {
       /* disk full or gone: drop the line, keep running */
@@ -965,12 +1015,15 @@ export async function runDaemon(argv: string[] = process.argv.slice(2)): Promise
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("uncaughtException", error => {
-    // One line, best-effort; must never recurse through logging.
+    // One line, best-effort; must never recurse through logging. Then exit:
+    // running on in an unknown state is worse than a supervised restart (P3-10).
     try {
       log(`uncaught: ${error.stack ?? error.message}`);
     } catch {
       /* drop */
     }
+    log("shutting down after uncaught exception; the extension will restart this daemon");
+    void bridge.stop().then(() => process.exit(1));
   });
 
   try {

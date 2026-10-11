@@ -102,7 +102,8 @@ export class Holder {
   }
 
   async start(): Promise<void> {
-    writeOwnRecord(this.record, this.paths);
+    // Bind first, then publish the record: CC preflights the socket's peer pid,
+    // so the record must never name a socket that is not listening yet (P3-7).
     this.server = net.createServer(socket => this.serveInbox(socket));
     try {
       if (existsSync(this.socketPath)) unlinkSync(this.socketPath);
@@ -113,6 +114,7 @@ export class Holder {
       this.server!.once("error", reject);
       this.server!.listen(this.socketPath, () => resolve());
     });
+    writeOwnRecord(this.record, this.paths);
     await this.connectParent();
     this.watchParent();
     this.log(`holder ${this.name} up (pid ${process.pid}, socket ${this.socketPath})`);
@@ -120,7 +122,15 @@ export class Holder {
 
   private serveInbox(socket: net.Socket): void {
     let buffer = Buffer.alloc(0);
+    let silence: NodeJS.Timeout | undefined;
+    const armSilence = () => {
+      if (silence) clearTimeout(silence);
+      silence = setTimeout(() => socket.destroy(), 30_000); // CC drops silent conns too
+      silence.unref?.();
+    };
+    armSilence();
     socket.on("data", chunk => {
+      armSilence();
       buffer = Buffer.concat([buffer, chunk]);
       if (buffer.length > MAX_LINE_BYTES) {
         this.log("inbox line exceeds cap; dropping connection");
@@ -136,6 +146,7 @@ export class Holder {
       }
     });
     socket.on("error", () => socket.destroy());
+    socket.on("close", () => silence && clearTimeout(silence));
   }
 
   private async connectParent(): Promise<void> {
@@ -173,6 +184,9 @@ export class Holder {
     parent.on("error", error => this.log(`parent link: ${error.message}`));
     parent.on("close", () => {
       this.parent = null;
+      // Parent link lost (crash or pid reuse): exit and let it respawn us.
+      // The 5s poll stays only as a backstop for lost close events (P3-6).
+      if (!this.stopped) void this.stop().then(() => process.exit(0));
     });
     this.send({
       type: "hello",
@@ -308,4 +322,8 @@ if (/holder\.(ts|mjs)$/.test(process.argv[1] ?? "")) {
   };
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
+  process.on("uncaughtException", error => {
+    log(`uncaught: ${error.stack ?? error.message}; exiting for respawn`);
+    void holder.stop().then(() => process.exit(1));
+  });
 }

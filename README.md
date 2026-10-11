@@ -81,6 +81,13 @@ npm run typecheck
 npm test             # protocol fixtures from live captures + broker client integration
 ```
 
+## Memory-file sections
+
+Paste-ready, token-conscious orientation for agents on each side:
+
+- pi: `snippets/agents-md-section.md` → `AGENTS.md`
+- Claude Code: `claude-plugin/snippets/claude-md-section.md` → `CLAUDE.md`
+
 ## Security & trust
 
 Same-uid local IPC only; no network exposure.

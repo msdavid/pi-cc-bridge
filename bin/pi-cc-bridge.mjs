@@ -2,7 +2,8 @@
 /** Launcher: prefer the prebuilt daemon bundle (plain node, no tsx); fall
  * back to the TypeScript entry under tsx when dist/ is absent (source checkouts). */
 import { spawn } from "node:child_process";
-import { existsSync, createRequire } from "node:module";
+import { createRequire } from "node:module";
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 

@@ -20,6 +20,7 @@
     "dist",
     "claude-plugin",
     "docs",
+    "snippets",
     "README.md"
   ],
   "pi": {
@@ -53,6 +54,9 @@
     "name": "mauro"
   },
   "engines": {
-    "node": ">=20"
-  }
+    "node": ">=20.6"
+  },
+  "os": [
+    "linux"
+  ]
 }

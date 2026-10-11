@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, unlinkSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, unlinkSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import net from "node:net";
@@ -39,7 +39,7 @@ interface Fixture {
 }
 
 async function setupFixture(): Promise<Fixture> {
-  const { agentDir } = await startIsolatedBroker();
+  const { agentDir, stop: stopBroker } = await startIsolatedBroker();
   const sessionsDir = join(agentDir, "cc-sessions");
   const socketDir = join(agentDir, "cc-run");
   mkdirSync(sessionsDir, { recursive: true, mode: 0o700 });
@@ -105,6 +105,8 @@ async function setupFixture(): Promise<Fixture> {
       /* already gone */
     }
     myServer.close();
+    stopBroker();
+    rmSync(agentDir, { recursive: true, force: true }); // P3-9: no test temp leaks
   };
   return { agentDir, sessionsDir, socketDir, mySocketPath, myServer, myLines, cleanup };
 }

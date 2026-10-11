@@ -45,7 +45,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /** Parse one socket line as CC's inbox would. Never throws. */
 export function parseInboundLine(line: string): ParsedInbound {
-  if (line.length > MAX_LINE_BYTES) {
+  if (Buffer.byteLength(line, "utf-8") > MAX_LINE_BYTES) {
     return { kind: "unknown", reason: "line exceeds size cap" };
   }
   let raw: unknown;

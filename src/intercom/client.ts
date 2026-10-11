@@ -67,20 +67,13 @@ export type BrokerEvent =
   | { type: "presence_update"; session: BrokerSessionInfo }
   | { type: "error"; error: string; code?: string };
 
-/** Broker connect target: Unix socket preferred, TCP fallback (Windows). */
-export function brokerConnectTarget(agentDir: string): { kind: "unix"; path: string } | { kind: "tcp"; host: string; port: number } {
+/** Broker connect target: the Unix socket. This package requires /proc and
+ * /etc/machine-id (see package.json "os"), so the broker's TCP fallback
+ * (Windows) is out of scope — and it would need a stateId on register (P3-4). */
+export function brokerConnectTarget(agentDir: string): { kind: "unix"; path: string } {
   const intercomDir = join(agentDir, "intercom");
   const sock = join(intercomDir, "broker.sock");
   if (existsSync(sock)) return { kind: "unix", path: sock };
-  const portFile = join(intercomDir, "broker.port.json");
-  try {
-    const parsed = JSON.parse(readFileSync(portFile, "utf-8"));
-    if (parsed?.transport === "tcp" && parsed.host === "127.0.0.1" && typeof parsed.port === "number") {
-      return { kind: "tcp", host: parsed.host, port: parsed.port };
-    }
-  } catch {
-    /* fallthrough */
-  }
   throw new Error(`no pi-intercom broker endpoint found under ${intercomDir}`);
 }
 
@@ -116,7 +109,7 @@ export class BrokerClient extends EventEmitter {
     if (this.socket) throw new Error("broker client already connected");
     this.heartbeatIntervalMs = session.livenessIntervalMs ?? 10_000;
     const target = brokerConnectTarget(this.agentDir);
-    const socket = target.kind === "unix" ? net.createConnection(target.path) : net.createConnection(target.port, target.host);
+    const socket = net.createConnection(target.path);
     this.socket = socket;
     socket.setNoDelay(true);
     this.onData = createFrameReader(raw => this.handleFrame(raw), error => {

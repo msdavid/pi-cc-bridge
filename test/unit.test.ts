@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseInboundLine, buildOutboundLine, unwrapCrossSessionMessage } from "../src/cc/protocol.ts";
 import { procStart } from "../src/cc/registry.ts";
-import { aliasExposed, matchTarget, parseToHeader, toCcStatus } from "../src/routing.ts";
+import { aliasExposed, allocateHolderAlias, matchTarget, parseToHeader, routeFunnel, toCcStatus } from "../src/routing.ts";
 import { RateLimiter } from "../src/ratelimit.ts";
 import { createFrameReader } from "../src/intercom/framing.ts";
 
@@ -102,4 +102,48 @@ test("rate limiter: burst then refill", () => {
   t += 10_000; // 10s → 6/min = 1 token
   assert.equal(rl.allow("k", t), true);
   assert.equal(rl.allow("k", t), false);
+});
+
+test("allocateHolderAlias: stable under presence storms (critic P1-2 table)", () => {
+  const session = { id: "s1", name: "x" };
+  const holders = [{ piSessionId: "s1", alias: "x" }];
+  // Own holder must NOT be a collision: repeated calls return the same alias forever.
+  for (let i = 0; i < 20; i++) {
+    assert.equal(allocateHolderAlias({ session, holders, ccPiNames: [], peerName: "pi-bridge" }), "x");
+  }
+  // Second session with the same name gets x#2 — and keeps it.
+  const session2 = { id: "s2", name: "x" };
+  assert.equal(
+    allocateHolderAlias({ session: session2, holders, ccPiNames: [], peerName: "pi-bridge" }),
+    "x#2",
+  );
+  const holders2 = [...holders, { piSessionId: "s2", alias: "x#2" }];
+  for (let i = 0; i < 20; i++) {
+    assert.equal(allocateHolderAlias({ session: session2, holders: holders2, ccPiNames: [], peerName: "pi-bridge" }), "x#2");
+    assert.equal(allocateHolderAlias({ session, holders: holders2, ccPiNames: [], peerName: "pi-bridge" }), "x");
+  }
+  // CC-namespace pi-* names are respected, and the funnel reserves its own.
+  assert.equal(
+    allocateHolderAlias({ session: { id: "s3", name: "bridge" }, holders: holders2, ccPiNames: ["bridge"], peerName: "pi-bridge" }),
+    "bridge#2",
+  );
+});
+
+test("routeFunnel: explicit addresses hold, never reroute (critic P1-8 table)", () => {
+  const roster = [
+    { id: "aaa", name: "planner" },
+    { id: "bbb", name: "worker" },
+    { id: "cc-1", name: "claude:test-cc" },
+  ];
+  // To: resolves (bare or pi- spelling), strips the header, explicit-unknown holds
+  assert.deepEqual(routeFunnel("To: worker\ndo the thing", roster, undefined), { target: "bbb", text: "do the thing" });
+  assert.deepEqual(routeFunnel("To: pi-planner\nhi", roster, undefined), { target: "aaa", text: "hi" });
+  assert.deepEqual(routeFunnel("To: nobody\nhi", roster, undefined), { target: undefined, text: "To: nobody\nhi" });
+  // routeTo only applies without an explicit header
+  assert.deepEqual(routeFunnel("plain", roster, "planner"), { target: "aaa", text: "plain" });
+  assert.deepEqual(routeFunnel("To: nobody\nhi", roster, "planner"), { target: undefined, text: "To: nobody\nhi" });
+  // single other session rule; cc-* entries never qualify
+  assert.deepEqual(routeFunnel("plain", [{ id: "cc-1" }, { id: "only", name: "solo" }], undefined), { target: "only", text: "plain" });
+  assert.deepEqual(routeFunnel("plain", [{ id: "cc-1" }], undefined), { target: undefined, text: "plain" });
+  assert.deepEqual(routeFunnel("plain", roster, undefined), { target: undefined, text: "plain" }); // ambiguous
 });
