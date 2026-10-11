@@ -1,0 +1,13 @@
+{
+  "name": "pi-cc-bridge",
+  "owner": { "name": "mauro" },
+  "description": "pi-cc-bridge: message pi coding-agent sessions from Claude Code (and back) via pi-intercom",
+  "plugins": [
+    {
+      "name": "pi-cc-bridge",
+      "source": "./claude-plugin",
+      "description": "Message pi coding-agent sessions through the pi-cc-bridge peer: pi sessions appear in /list-agents as pi-<alias>.",
+      "keywords": ["pi", "pi-intercom", "bridge", "cross-session"]
+    }
+  ]
+}
