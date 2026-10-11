@@ -1,50 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { BrokerClient } from "../src/intercom/client.ts";
+import { startIsolatedBroker, resolveTsx, waitFor, BROKER_ENTRY, SKIP, SKIP_REASON } from "./helpers.ts";
 
 /**
  * Integration: run a real (isolated) pi-intercom broker under a temp agent dir
  * and verify our client's register/send/receive/receipt/list flow. Skipped when
  * pi-intercom is not installed at the standard path.
  */
-
-const PI_INTERCOM_DIR = "/home/mauro/.pi/agent/npm/node_modules/pi-intercom";
-const BROKER_ENTRY = join(PI_INTERCOM_DIR, "broker", "broker.ts");
-
-function resolveTsx(): string | undefined {
-  try {
-    return require.resolve("tsx");
-  } catch {
-    const sibling = join(PI_INTERCOM_DIR, "..", "tsx", "dist", "loader.mjs");
-    return existsSync(sibling) ? sibling : undefined;
-  }
-}
-
-async function startIsolatedBroker(): Promise<{ agentDir: string; stop: () => void }> {
-  const agentDir = mkdtempSync(join(tmpdir(), "ccbridge-test-"));
-  const tsx = resolveTsx();
-  if (!tsx) throw new Error("tsx loader not found");
-  const child = spawn(
-    process.execPath,
-    ["--import", tsx, BROKER_ENTRY],
-    {
-      env: { ...process.env, PI_CODING_AGENT_DIR: agentDir, NODE_NO_WARNINGS: "1" },
-      stdio: ["ignore", "ignore", "pipe"],
-    },
-  );
-  const sock = join(agentDir, "intercom", "broker.sock");
-  for (let i = 0; i < 100; i++) {
-    if (existsSync(sock)) break;
-    await sleep(100);
-  }
-  if (!existsSync(sock)) throw new Error(`broker did not create ${sock}`);
-  return { agentDir, stop: () => child.kill("SIGTERM") };
-}
 
 function registration(name: string) {
   return {
@@ -60,7 +26,7 @@ function registration(name: string) {
   };
 }
 
-test("broker client: register, list, send, receive, receipt, delivered", { skip: !existsSync(BROKER_ENTRY) }, async t => {
+test("broker client: register, list, send, receive, receipt, delivered", { skip: SKIP_REASON }, async t => {
   const { agentDir, stop } = await startIsolatedBroker();
   t.after(() => stop());
 

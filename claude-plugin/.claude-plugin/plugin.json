@@ -1,7 +1,7 @@
 {
   "name": "pi-cc-bridge",
   "displayName": "pi-cc-bridge",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Message pi coding-agent sessions through the pi-cc-bridge peer: pi sessions appear in /list-agents as pi-bridge.",
   "author": {
     "name": "mauro"

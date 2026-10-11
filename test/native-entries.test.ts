@@ -7,7 +7,7 @@ import { join } from "node:path";
 import net from "node:net";
 import { setTimeout as sleep } from "node:timers/promises";
 import { randomUUID } from "node:crypto";
-import { startIsolatedBroker, resolveTsx, waitFor, BROKER_ENTRY } from "./helpers.ts";
+import { startIsolatedBroker, resolveTsx, waitFor, BROKER_ENTRY, SKIP, SKIP_REASON } from "./helpers.ts";
 import { BrokerClient } from "../src/intercom/client.ts";
 import { buildOutboundLine } from "../src/cc/protocol.ts";
 
@@ -42,8 +42,8 @@ async function setupFixture(): Promise<Fixture> {
   const { agentDir } = await startIsolatedBroker();
   const sessionsDir = join(agentDir, "cc-sessions");
   const socketDir = join(agentDir, "cc-run");
-  mkdirSync(sessionsDir, { recursive: true });
-  mkdirSync(socketDir, { recursive: true });
+  mkdirSync(sessionsDir, { recursive: true, mode: 0o700 });
+  mkdirSync(socketDir, { recursive: true, mode: 0o700 });
 
   const mySocketPath = join(socketDir, `${process.pid}.sock`);
   const myLines: string[] = [];
@@ -91,7 +91,7 @@ async function setupFixture(): Promise<Fixture> {
   mkdirSync(stateDir, { recursive: true });
   writeFileSync(
     join(stateDir, "config.json"),
-    JSON.stringify({ enabled: true, pollMs: 250, nativeEntries: true, maxHolders: 8, ccSessionsDir: sessionsDir, socketDirOverride: undefined }),
+    JSON.stringify({ enabled: true, pollMs: 250, expose: ["*"], maxHolders: 8, ccSessionsDir: sessionsDir }),
   );
   // socketDir override goes through the same key the config loader reads:
   const cfg = JSON.parse(readFileSync(join(stateDir, "config.json"), "utf-8"));
@@ -118,7 +118,7 @@ function startDaemon(agentDir: string): ReturnType<typeof spawn> {
   });
 }
 
-test("native entries: holder child exposes pi sessions to CC; both relays work", { skip: !existsSync(BROKER_ENTRY) }, async t => {
+test("native entries: holder child exposes pi sessions to CC; both relays work", { skip: SKIP_REASON }, async t => {
   const fixture = await setupFixture();
   t.after(() => fixture.cleanup());
 
@@ -163,6 +163,8 @@ test("native entries: holder child exposes pi sessions to CC; both relays work",
   const holderRecordJson = JSON.parse(readFileSync(holderRecord, "utf-8"));
   assert.equal(holderRecordJson.name, "pi-planner");
   assert.equal(holderRecordJson.status, "busy"); // mirrored from planner's registration
+  assert.notEqual(holderRecordJson.procStart, "0", "procStart must be the real field 22, not itrealvalue");
+  assert.equal(holderRecordJson.bridgeOwner, "pi-cc-bridge");
   const holderSocket = holderRecordJson.messagingSocketPath as string;
   assert.ok(existsSync(holderSocket), "holder socket must exist");
 
@@ -196,7 +198,8 @@ test("native entries: holder child exposes pi sessions to CC; both relays work",
   assert.ok(ccGot, "fake CC socket must receive the pi message");
   const inbound = JSON.parse(fixture.myLines.find(l => l.includes("NATIVE-PI-TO-CC-1"))!);
   assert.equal(inbound.type, "user");
-  assert.match(inbound.message.content, /from-name="pi:test-cc"/);
+  assert.match(inbound.message.content, /from-name="pi-planner"/, "sender identity must be the pi session's holder entry");
+  assert.equal(inbound.from, holderSocket, "sender socket must be the holder's socket so replies route back");
 
   // 5. cleanup: daemon SIGTERM removes holder record + socket.
   const holderPid = holderRecordJson.pid;
@@ -207,7 +210,7 @@ test("native entries: holder child exposes pi sessions to CC; both relays work",
 
 function readDaemonPid(agentDir: string): string {
   try {
-    return readFileSync(join(agentDir, "pi-cc-bridge", "daemon.pid"), "utf-8").trim();
+    return readFileSync(join(agentDir, "pi-cc-bridge", "daemon.lock"), "utf-8").trim().split(" ")[0];
   } catch {
     return "0";
   }

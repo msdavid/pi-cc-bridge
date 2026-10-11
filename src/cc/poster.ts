@@ -33,12 +33,15 @@ export async function postToCcInbox(options: PostOptions): Promise<void> {
     targetSessionId: options.targetSessionId,
     priority: options.priority,
   });
+  const settleMs = options.settleMs ?? 250;
   await new Promise<void>((resolve, reject) => {
     const socket = net.createConnection(options.socketPath);
     const fail = (error: Error) => {
       socket.destroy();
       reject(error);
     };
+    const overall = setTimeout(() => fail(new Error("post timeout")), (options.connectTimeoutMs ?? 5_000) + settleMs + 1_000);
+    overall.unref?.();
     socket.setTimeout(options.connectTimeoutMs ?? 5_000, () => fail(new Error("connect timeout")));
     socket.once("connect", () => {
       socket.setTimeout(0);
@@ -46,9 +49,10 @@ export async function postToCcInbox(options: PostOptions): Promise<void> {
       socket.write((authLine ? `${authLine}\n` : "") + line + "\n", "utf-8", () => {
         // Keep the connection briefly so a slow reader drains the buffer, then close.
         setTimeout(() => {
+          clearTimeout(overall);
           socket.end();
           resolve();
-        }, options.settleMs ?? 250);
+        }, settleMs);
       });
     });
     socket.once("error", fail);

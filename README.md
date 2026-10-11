@@ -81,12 +81,21 @@ npm run typecheck
 npm test             # protocol fixtures from live captures + broker client integration
 ```
 
-## Security
+## Security & trust
 
-Same-uid local IPC only; no network exposure. CC→pi messages start agent turns
-in pi (that is the point), so `routeTo`/`To:` is the deliberate trust boundary.
-Unroutable messages are held, not delivered. See `docs/DESIGN.md` for the
-full trust model.
+Same-uid local IPC only; no network exposure.
+
+- **pi → CC**: pi sessions are declared `bypass`-class (`piSenderMode`), because pi has no
+  approval gate by default — so prompting-mode CC sessions hold pi messages for approval,
+  exactly as CC would for any bypass sender.
+- **CC → pi**: bypass-class CC senders are held (`ccInbound: "hold-bypass"`).
+- **Exposure is opt-in**: `expose` (default `[]`) chooses which pi sessions appear in CC's
+  `/list-agents` up front; every pi session that messages CC first gets an entry lazily.
+- **Rate limits** per direction pair; excess is held.
+- Anything unroutable, failed, or rate-limited lands in `~/.pi/agent/pi-cc-bridge/held/` —
+  never silently dropped, never guessed.
+
+See `docs/DESIGN.md` for the full model.
 
 ## Status
 

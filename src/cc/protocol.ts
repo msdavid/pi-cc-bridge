@@ -107,10 +107,11 @@ export function unwrapCrossSessionMessage(content: string): { text: string; meta
   const header = content.slice(openTag.length, gt);
   const body = content.slice(gt + 1, end);
   const meta: CrossSessionMeta = {};
+  const unescape = (v: string) => v.replace(/&(amp|quot|lt);/g, (_, e) => (e === "amp" ? "&" : e === "quot" ? '"' : "<"));
   for (const key of ["from", "from-name", "from-mode"] as const) {
     const match = header.match(new RegExp(`${key}="([^"]*)"`));
     if (match) {
-      const value = match[1];
+      const value = unescape(match[1]);
       if (key === "from") meta.from = value;
       else if (key === "from-name") meta.fromName = value;
       else meta.fromMode = value;
@@ -153,7 +154,7 @@ export function buildAuthLine(token: string): string {
 
 function escapeAttr(value: string): string {
   return value
-    .replace(/&/g, "&")
+    .replace(/&/g, '&' + 'amp;')
     .replace(/"/g, '&' + 'quot;')
     .replace(/</g, '&' + 'lt;');
 }

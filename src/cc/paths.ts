@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { lstatSync, mkdirSync, chmodSync } from "node:fs";
 
 /**
  * Filesystem layout of Claude Code's messaging surface, as captured on 2.1.296.
@@ -56,9 +57,38 @@ export interface CcRecord {
   updatedAt?: number;
   status?: string;
   statusUpdatedAt?: number;
+  /** Ownership marker written only by bridge processes (P0-1: out-of-band ownership). */
+  bridgeOwner?: string;
 }
 
 export const SUPPORTED_PEER_PROTOCOL = 1;
+export const BRIDGE_OWNER = "pi-cc-bridge";
+
+/**
+ * Create a runtime directory we will bind sockets in, with the same owner-only
+ * posture CC uses (0700), refusing anything that looks hijacked (P0-7).
+ */
+export function ensurePrivateDir(dir: string): void {
+  let st;
+  try {
+    st = lstatSync(dir);
+  } catch {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    st = lstatSync(dir);
+  }
+  if (!st.isDirectory()) throw new Error(`refusing non-directory ${dir}`);
+  if (st.uid !== (process.getuid?.() ?? -1)) throw new Error(`refusing directory owned by another user: ${dir}`);
+  if ((st.mode & 0o077) !== 0) {
+    // Pre-existing but ours (e.g. created by an earlier run before hardening):
+    // tighten instead of refusing.
+    chmodSync(dir, 0o700);
+  }
+}
+
+/** Ensure the CC registry dir exists (CC itself does this; we may run first). */
+export function ensureSessionsDir(options: CcPathsOptions = {}): void {
+  mkdirSync(ccSessionsDir(options), { recursive: true, mode: 0o700 });
+}
 
 /** True when a registry record names a socket this daemon can plausibly target. */
 export function isTargetableRecord(record: CcRecord): boolean {

@@ -42,11 +42,14 @@ Run `/list-agents` — `pi-<alias>` entries are pi sessions. Sending `list` to
   idle one it starts a new turn. Do not spam: the bridge and pi rate-limit.
 - Your own session name is the identity the pi session sees ("Message from
   Claude Code session <name>"). Set it with `--name` or `/rename`.
-- A pi session may be busy or its user may be away; use `notify_when_idle`
-  only when you truly need one completion notice.
+- A pi session may be busy or its user may be away; delivery happens between
+  its tool calls or on its next idle turn. Do not retry in a loop.
 - If `SendMessage` reports the bridge cannot receive, the daemon is down:
   tell the user to run `/cc-bridge start` in any pi session (or
-  `pi-cc-bridge` directly). Do not retry in a loop.
+  `pi-cc-bridge` directly).
+- Messages sent by agents that skip permission checks may be held for review
+  before a pi session sees them; that is intentional. Say what you need in
+  plain text and let the human approve.
 
 ## What not to do
 

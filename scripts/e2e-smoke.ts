@@ -65,7 +65,7 @@ async function main(): Promise<void> {
   let daemonPidFile = "";
   for (let i = 0; i < 50; i++) {
     try {
-      daemonPidFile = readFileSync(join(stateDir, "daemon.pid"), "utf-8").trim();
+      daemonPidFile = readFileSync(join(stateDir, "daemon.lock"), "utf-8").trim().split(" ")[0];
       if (daemonPidFile && existsSync(join(realSessions, `${daemonPidFile}.json`))) break;
     } catch {
       /* not yet */

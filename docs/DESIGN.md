@@ -135,7 +135,7 @@ Recommendation for CC worker sessions that should accept pi traffic unattended:
 | CC session record `<pid>.json` | Synthetic intercom session `cc-<sessionId>`, name `claude:<name>` (fallback `claude-pid-<pid>`; `#<pid>` suffix on name collisions) |
 | CC `status` | intercom presence `status` (idle/busy) |
 | CC→pi message | relayed by the *sender peer's* connection, so pi sees `from = claude:<name>` |
-| pi→CC message | `from-name = peerName` (`pi-bridge`), `from-mode = prompting` |
+| pi→CC message | from the pi session's **holder socket**, `from-name = pi-<alias>` (funnel fallback: `peerName` + `To:` hint in text); `from-mode` = `piSenderMode` (default `bypass`) |
 | pi→CC text | wrapped in `<cross-session-message>` exactly like a native CC sender |
 | CC→pi text | wrapper stripped, replaced with a `Message from Claude Code session <name>` prefix |
 
@@ -171,7 +171,7 @@ is connected — that session.
 ```
 ~/.pi/agent/pi-cc-bridge/
 ├── config.json        # { enabled, peerName, pollMs, routeTo, logLevel, ccSessionsDir? }
-├── daemon.pid
+├── daemon.lock       # O_EXCL single-instance lock: `pid procStart` (P0-3)
 ├── daemon.log
 └── held/              # unroutable CC messages
 ```
@@ -212,9 +212,22 @@ Both are cosmetic; the current registration format works unmodified today.
 ## Security notes
 
 - All transports are same-uid local IPC; no network exposure anywhere.
-- The bridge never touches CC `.key` auth files (Linux external sends don't need them) and
-  never writes other sessions' registry records.
-- CC→pi messages start agent turns in pi: `routeTo` + the `To:` header are the deliberate
-  trust boundary; unroutable messages are held, not delivered.
-- pi→CC messages inherit CC's inbound controls verbatim (a bypass-mode CC session will hold
-  `prompting`-class senders for user approval — by design).
+- **Sender classes are honest** (P0-6): pi sessions have no approval gate by default, so
+  the bridge declares them `bypass`-class to CC (`piSenderMode`). CC's own hold matrix then
+  applies verbatim: prompting-mode CC sessions hold pi messages for user approval; only
+  bypass↔bypass delivers unattended. Declaring `prompting` is an explicit operator
+  assertion the bridge cannot verify.
+- **Inbound mirroring is opt-in** (P1-13, disagreement): `expose` (glob over aliases,
+  default `[]`) decides which pi sessions get a CC-native entry up front. Every pi session
+  that messages CC first gets its holder lazily (contact-driven), so the reply path always
+  exists while cold discovery stays a decision.
+- **Bypass-class CC senders are held** (`ccInbound: "hold-bypass"` default): the bridge
+  applies the same hold CC would, and notifies the sender's socket.
+- **Rate limits** (`relayPerMin`/`relayBurst`, default 6/min burst 3 per direction pair):
+  excess traffic is held, not delivered — a CC↔pi agent loop self-extinguishes.
+- Unroutable messages, delivery failures, and rate-limited traffic land in `held/` — the
+  bridge never guesses, and CC's `SendMessage` success is never a lie.
+- The bridge never touches CC `.key` auth files and never writes or deletes other
+  processes' registry records; ownership is marked out-of-band (`bridgeOwner`).
+- Record identity fields are verified against CC's own records at startup
+  (`selfCheckProcStart`) so parse drift cannot go silent.

@@ -1,12 +1,19 @@
 import net, { Socket } from "node:net";
 import { EventEmitter } from "node:events";
 import { readFileSync, existsSync } from "node:fs";
+import { writeFrame, createFrameReader } from "./framing.ts";
 import { join } from "node:path";
 
 /**
  * Minimal pi-intercom broker client (protocol "pi-intercom" v1, as shipped in
- * pi-intercom 0.17.0): newline-free length-prefixed JSON frames
- * (4-byte big-endian length + payload), one registered session per connection.
+ * pi-intercom 0.17.0): length-prefixed JSON frames (4-byte big-endian length +
+ * payload), one registered session per connection.
+ *
+ * Lifecycle (P0-2): connectAndRegister resolves only on the broker's
+ * `registered` frame (bounded by a timeout) and rejects on error frames or a
+ * socket close. Afterwards, `close`/`error` emit `disconnected` — the owner
+ * decides on reconnection. rawSend throws when not connected instead of
+ * dropping frames silently.
  */
 
 export const INTERCOM_PROTOCOL_NAME = "pi-intercom";
@@ -28,6 +35,7 @@ export interface IntercomMessage {
   id: string;
   timestamp: number;
   replyTo?: string;
+  expectsReply?: boolean;
   content: { text: string };
 }
 
@@ -40,27 +48,24 @@ export interface BrokerSessionInfo {
   status?: string;
 }
 
+export interface MessageReceiptFrame {
+  messageId: string;
+  status: string;
+  timestamp: number;
+  detail?: string;
+}
+
 export type BrokerEvent =
   | { type: "registered"; sessionId: string; features?: string[] }
   | { type: "sessions"; requestId: string; sessions: BrokerSessionInfo[] }
   | { type: "message"; from: BrokerSessionInfo; message: IntercomMessage }
   | { type: "delivered"; messageId: string }
   | { type: "delivery_failed"; messageId: string; reason: string }
+  | { type: "message_receipt"; from: BrokerSessionInfo; receipt: MessageReceiptFrame }
   | { type: "session_joined"; session: BrokerSessionInfo }
   | { type: "session_left"; sessionId: string }
   | { type: "presence_update"; session: BrokerSessionInfo }
   | { type: "error"; error: string; code?: string };
-
-const MAX_FRAME_BYTES = 1024 * 1024;
-
-function writeFrame(socket: Socket, msg: unknown): void {
-  const json = JSON.stringify(msg);
-  const payloadLength = Buffer.byteLength(json, "utf-8");
-  const frame = Buffer.allocUnsafe(4 + payloadLength);
-  frame.writeUInt32BE(payloadLength, 0);
-  frame.write(json, 4, payloadLength, "utf-8");
-  socket.write(frame);
-}
 
 /** Broker connect target: Unix socket preferred, TCP fallback (Windows). */
 export function brokerConnectTarget(agentDir: string): { kind: "unix"; path: string } | { kind: "tcp"; host: string; port: number } {
@@ -81,13 +86,10 @@ export function brokerConnectTarget(agentDir: string): { kind: "unix"; path: str
 
 export class BrokerClient extends EventEmitter {
   private socket: Socket | null = null;
-  private header = Buffer.allocUnsafe(4);
-  private headerBytes = 0;
-  private payload: Buffer | null = null;
-  private payloadBytes = 0;
-  private payloadLength = 0;
+  private onData: ((data: Buffer) => void) | null = null;
   private heartbeat: NodeJS.Timeout | null = null;
   private registered = false;
+  private heartbeatIntervalMs = 10_000;
   listSeq = 0;
 
   constructor(
@@ -97,60 +99,77 @@ export class BrokerClient extends EventEmitter {
     super();
   }
 
-  async connectAndRegister(sessionId: string, session: SessionRegistration): Promise<void> {
+  get isRegistered(): boolean {
+    return this.registered;
+  }
+
+  get isConnected(): boolean {
+    return this.socket !== null && !this.socket.destroyed;
+  }
+
+  /**
+   * Connect + register. Resolves on the `registered` frame; rejects on error
+   * frames, socket close, or timeout. Safe to await: no partial state is left
+   * behind on failure (socket destroyed by the caller on rejection).
+   */
+  async connectAndRegister(sessionId: string, session: SessionRegistration, timeoutMs = 5_000): Promise<void> {
+    if (this.socket) throw new Error("broker client already connected");
+    this.heartbeatIntervalMs = session.livenessIntervalMs ?? 10_000;
     const target = brokerConnectTarget(this.agentDir);
-    await new Promise<void>((resolve, reject) => {
-      const socket =
-        target.kind === "unix" ? net.createConnection(target.path) : net.createConnection(target.port, target.host);
-      this.socket = socket;
-      socket.once("error", reject);
-      socket.once("connect", () => {
-        socket.setNoDelay(true);
-        socket.on("data", chunk => this.onData(chunk));
-        writeFrame(socket, {
-          type: "register",
-          sessionId,
-          session,
-        });
-        resolve();
-      });
+    const socket = target.kind === "unix" ? net.createConnection(target.path) : net.createConnection(target.port, target.host);
+    this.socket = socket;
+    socket.setNoDelay(true);
+    this.onData = createFrameReader(raw => this.handleFrame(raw), error => {
+      this.emit("error", { type: "error", error: error.message, code: "E_FRAME" });
+      this.close();
     });
-    const interval = session.livenessIntervalMs ?? 10_000;
-    this.heartbeat = setInterval(() => this.presence(), Math.max(1_000, interval - 1_000));
+    socket.on("data", chunk => this.handleSocketData(chunk));
+    socket.on("error", error => this.log(`broker socket: ${error.message}`));
+    socket.on("close", () => {
+      if (this.heartbeat) clearInterval(this.heartbeat);
+      this.heartbeat = null;
+      this.socket = null;
+      this.registered = false;
+      this.emit("disconnected");
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      const ok = (event: { type: string }) => {
+        if (event.type !== "registered") return;
+        cleanup();
+        resolve();
+      };
+      const bad = (event: { type: string; error?: string; code?: string }) => {
+        if (event.type !== "error") return;
+        cleanup();
+        reject(new Error(`${event.code ?? "E_BROKER"}: ${event.error ?? "broker error"}`));
+      };
+      const closed = () => {
+        cleanup();
+        reject(new Error("broker closed during register"));
+      };
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error("broker register timeout"));
+      }, timeoutMs);
+      const cleanup = () => {
+        clearTimeout(timer);
+        this.off("registered", ok);
+        this.off("error", bad);
+        socket.off("close", closed);
+      };
+      this.on("registered", ok);
+      this.on("error", bad);
+      socket.once("close", closed);
+      socket.once("connect", () => writeFrame(socket, { type: "register", sessionId, session }));
+    });
+
+    this.heartbeat = setInterval(() => this.presence(), Math.max(1_000, this.heartbeatIntervalMs - 1_000));
     this.heartbeat.unref?.();
   }
 
-  private onData(data: Buffer): void {
-    let offset = 0;
-    while (offset < data.length) {
-      if (this.headerBytes < 4) {
-        const bytes = Math.min(4 - this.headerBytes, data.length - offset);
-        data.copy(this.header, this.headerBytes, offset, offset + bytes);
-        this.headerBytes += bytes;
-        offset += bytes;
-        if (this.headerBytes < 4) return;
-        this.payloadLength = this.header.readUInt32BE(0);
-        if (this.payloadLength > MAX_FRAME_BYTES) {
-          this.emit("broker_error", new Error(`frame too large: ${this.payloadLength}`));
-          this.close();
-          return;
-        }
-      }
-      if (this.payload === null || this.payload.length !== this.payloadLength) {
-        this.payload = Buffer.allocUnsafe(this.payloadLength);
-      }
-      const bytes = Math.min(this.payloadLength - this.payloadBytes, data.length - offset);
-      data.copy(this.payload, this.payloadBytes, offset, offset + bytes);
-      this.payloadBytes += bytes;
-      offset += bytes;
-      if (this.payloadBytes < this.payloadLength) return;
-      const framePayload = this.payload;
-      this.headerBytes = 0;
-      this.payload = null;
-      this.payloadBytes = 0;
-      this.payloadLength = 0;
-      this.handleFrame(framePayload.toString("utf-8"));
-    }
+  private handleSocketData(data: Buffer): void {
+    this.onData?.(data);
   }
 
   private handleFrame(raw: string): void {
@@ -158,7 +177,7 @@ export class BrokerClient extends EventEmitter {
     try {
       msg = JSON.parse(raw);
     } catch (error) {
-      this.emit("broker_error", new Error(`bad broker frame: ${(error as Error).message}`));
+      this.emit("error", { type: "error", error: `bad broker frame: ${(error as Error).message}`, code: "E_FRAME" });
       return;
     }
     const event = msg as BrokerEvent;
@@ -167,10 +186,6 @@ export class BrokerClient extends EventEmitter {
       if (event.type === "error") this.log(`broker error: ${event.error}${event.code ? ` (${event.code})` : ""}`);
       this.emit(event.type, event);
     }
-  }
-
-  get isRegistered(): boolean {
-    return this.registered;
   }
 
   send(to: string, message: IntercomMessage): void {
@@ -196,7 +211,7 @@ export class BrokerClient extends EventEmitter {
   }
 
   private rawSend(msg: unknown): void {
-    if (!this.socket) throw new Error("broker client not connected");
+    if (!this.socket || this.socket.destroyed) throw new Error("broker client not connected");
     writeFrame(this.socket, msg);
   }
 

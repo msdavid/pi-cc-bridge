@@ -1,6 +1,6 @@
 {
   "name": "pi-cc-bridge",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Bridge pi-intercom sessions and Claude Code cross-session messaging: pi sessions and Claude Code sessions appear as peers to each other.",
   "type": "module",
   "license": "MIT",
@@ -17,6 +17,7 @@
     "extensions",
     "src",
     "bin",
+    "dist",
     "claude-plugin",
     "docs",
     "README.md"
@@ -33,12 +34,11 @@
     "start": "tsx src/cli.ts",
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "build": "esbuild src/holder.ts --bundle --platform=node --format=esm --outfile=dist/holder.mjs",
-    "prepublishOnly": "npm run typecheck && npm run build && npm test"
+    "build": "esbuild src/cli.ts --bundle --platform=node --format=esm --outfile=dist/cli.mjs && esbuild src/holder.ts --bundle --platform=node --format=esm --outfile=dist/holder.mjs",
+    "prepublishOnly": "npm run typecheck && npm run build && npm test",
+    "prepare": "npm run build"
   },
-  "dependencies": {
-    "tsx": "^4.20.0"
-  },
+  "dependencies": {},
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
   },
@@ -46,7 +46,8 @@
     "@earendil-works/pi-coding-agent": "*",
     "@types/node": "^24",
     "typescript": "^5",
-    "esbuild": "^0.27"
+    "esbuild": "^0.27",
+    "tsx": "^4.20.0"
   },
   "author": {
     "name": "mauro"

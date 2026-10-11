@@ -1,23 +1,25 @@
 import net from "node:net";
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, unlinkSync, appendFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { parseInboundLine, ParsedInbound } from "./cc/protocol.ts";
-import { CcRecord, ownSocketPath, CcPathsOptions } from "./cc/paths.ts";
-import { machineIdHash, procStart, procNsPid, writeOwnRecord, removeOwnRecord } from "./cc/registry.ts";
+import { CcRecord, ownSocketPath, CcPathsOptions, BRIDGE_OWNER } from "./cc/paths.ts";
+import { machineIdHash, procStart, procNsPid, writeOwnRecord, removeOwnRecord, listRecordsSync, pidDomainFor } from "./cc/registry.ts";
 
 /**
  * Holder child: one per live pi session. Binds a CC-compatible inbox socket and
  * writes a registry record named `pi-<peerPrefix><alias>` so Claude Code sees
  * (and addresses) each pi session natively in /list-agents.
  *
- * The child holds no broker connection: it forwards CC messages to the parent
- * daemon over a private IPC socket, and the parent relays them via the sending
- * CC session's own synthetic peer connection — attribution stays correct
- * ("Message from Claude Code session <name>") and no extra intercom sessions
- * are created. Status/alias/roster updates arrive on the same IPC socket; a
- * watchdog makes the child clean up and exit if the parent dies.
+ * The child holds no broker connection: it forwards EVERY user frame to the
+ * parent daemon over private IPC (the daemon owns routing, `list`, and `To:`),
+ * and the parent relays via the sending CC session's own synthetic peer
+ * connection — attribution stays correct and no extra intercom sessions are
+ * created. Status/alias updates arrive on the same IPC socket; a watchdog
+ * makes the child clean up and exit if the parent dies.
  */
 
 const LINE = 10; // \n
+const MAX_LINE_BYTES = 1024 * 1024;
 
 export interface HolderArgs {
   alias: string;
@@ -25,6 +27,7 @@ export interface HolderArgs {
   parentPid: number;
   ipcPath: string;
   peerPrefix: string;
+  heldDir?: string;
   sessionsDir?: string;
   socketDir?: string;
 }
@@ -43,14 +46,10 @@ export function parseHolderArgs(argv: string[]): HolderArgs {
     parentPid: raw.parentPid,
     ipcPath: raw.ipcPath,
     peerPrefix: typeof raw.peerPrefix === "string" && raw.peerPrefix ? raw.peerPrefix : "pi-",
+    heldDir: typeof raw.heldDir === "string" ? raw.heldDir : undefined,
     sessionsDir: raw.sessionsDir,
     socketDir: raw.socketDir,
   };
-}
-
-export interface RosterEntry {
-  id: string;
-  name?: string;
 }
 
 export class Holder {
@@ -60,7 +59,6 @@ export class Holder {
   private name: string;
   private server: net.Server | null = null;
   private parent: net.Socket | null = null;
-  private roster: RosterEntry[] = [];
   private stopped = false;
   private readonly log: (msg: string) => void;
 
@@ -81,10 +79,10 @@ export class Holder {
       procStart: procStart(),
       version: "bridge",
       peerProtocol: 1,
-      peerFeatures: ["notify_idle", "reply_across_default_dirs"],
+      peerFeatures: ["reply_across_default_dirs"], // notify_idle advertised only once implemented (P1-10)
       kind: "bridge",
       entrypoint: "cli",
-      pidDomain: `linux:${machineIdHash() ?? "unknown"}:pid:[${procNsPid() ?? "unknown"}]`,
+      pidDomain: pidDomainFor(listRecordsSync(this.paths)),
       messagingSocketPath: this.socketPath,
       name: this.name,
       nameSource: "user",
@@ -124,6 +122,12 @@ export class Holder {
     let buffer = Buffer.alloc(0);
     socket.on("data", chunk => {
       buffer = Buffer.concat([buffer, chunk]);
+      if (buffer.length > MAX_LINE_BYTES) {
+        this.log("inbox line exceeds cap; dropping connection");
+        socket.destroy();
+        buffer = Buffer.alloc(0);
+        return;
+      }
       let idx: number;
       while ((idx = buffer.indexOf(LINE)) !== -1) {
         const line = buffer.subarray(0, idx).toString("utf-8").trim();
@@ -167,7 +171,17 @@ export class Holder {
       }
     });
     parent.on("error", error => this.log(`parent link: ${error.message}`));
-    this.send({ type: "hello", pid: process.pid, alias: this.args.alias, piSessionId: this.args.piSessionId, name: this.name });
+    parent.on("close", () => {
+      this.parent = null;
+    });
+    this.send({
+      type: "hello",
+      pid: process.pid,
+      alias: this.args.alias,
+      piSessionId: this.args.piSessionId,
+      name: this.name,
+      socketPath: this.socketPath, // the daemon needs the real reply socket (P0-4)
+    });
   }
 
   private onParentLine(line: string): void {
@@ -196,12 +210,6 @@ export class Holder {
         }
         break;
       }
-      case "roster": {
-        if (Array.isArray(msg.sessions)) {
-          this.roster = msg.sessions as RosterEntry[];
-        }
-        break;
-      }
       case "shutdown": {
         void this.stop();
         break;
@@ -209,38 +217,46 @@ export class Holder {
     }
   }
 
-  private send(msg: unknown): void {
+  private send(msg: unknown): boolean {
+    if (!this.parent || this.parent.destroyed) {
+      this.spool(msg);
+      return false;
+    }
     try {
-      this.parent?.write(JSON.stringify(msg) + "\n");
+      this.parent.write(JSON.stringify(msg) + "\n");
+      return true;
     } catch {
-      /* parent link down; watchdog reaps us */
+      this.spool(msg);
+      return false;
     }
   }
 
-  /** CC → pi: parse the inbound line and hand it to the parent for relay. */
+  /** Parent link down: never lose CC traffic — spool locally. (P1-7) */
+  private spool(msg: unknown): void {
+    if (!this.args.heldDir) return;
+    try {
+      mkdirSync(this.args.heldDir, { recursive: true, mode: 0o700 });
+      const file = join(this.args.heldDir, `holder-${Date.now()}-${crypto.randomUUID().slice(0, 8)}.json`);
+      writeFileSync(file, JSON.stringify(msg, null, 2), { flag: "wx", mode: 0o600 });
+      appendFileSync(join(this.args.heldDir, "holder.log"), `${new Date().toISOString()} spooled ${file}\n`);
+      this.log(`parent link down; spooled to ${file}`);
+    } catch (error) {
+      this.log(`spool failed: ${(error as Error).message}`);
+    }
+  }
+
+  /** CC → pi: parse the inbound line and hand it to the parent for ALL decisions. */
   private onCcFrame(frame: ParsedInbound): void {
     if (frame.kind !== "user") {
       if (frame.kind === "action") this.log(`action frame ${frame.action} (ignored)`);
       else if (frame.kind === "unknown") this.log(`dropped line: ${frame.reason}`);
       return;
     }
-    const query = frame.text.trim().toLowerCase();
-    if (query === "list") {
-      const names = this.roster.map(s => s.name ?? s.id);
-      this.send({
-        type: "reply",
-        toSocket: frame.meta.from,
-        text: names.length
-          ? `Reachable pi sessions (you can SendMessage any of these directly):\n${names.map(n => `- ${n}`).join("\n")}`
-          : "No other pi sessions are currently connected to intercom.",
-        msgId: `list-${frame.line.msg_id}`.slice(0, 128),
-      });
-      return;
-    }
     this.send({
       type: "cc-message",
-      fromSocket: frame.meta.from,
+      fromSocket: frame.line.from ?? frame.meta.from, // structured field first (P1-4)
       fromName: frame.meta.fromName,
+      fromMode: frame.meta.fromMode, // the daemon enforces its own inbound policy (P1-13)
       text: frame.text,
       msgId: frame.line.msg_id,
     });

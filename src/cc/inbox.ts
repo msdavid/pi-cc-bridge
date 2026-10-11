@@ -22,6 +22,7 @@ export interface CcInboxServer {
 }
 
 const LINE_SPLIT = 10; // \n
+const MAX_LINE_BYTES = 1024 * 1024; // same cap CC applies to serialized messages
 
 /** Connect-probe helper: resolves true when something answers the socket. */
 function probeSocket(path: string, timeoutMs = 500): Promise<boolean> {
@@ -68,6 +69,12 @@ export async function startCcInbox(options: CcInboxOptions): Promise<CcInboxServ
       socket.on("data", chunk => {
         armSilence();
         buffer = Buffer.concat([buffer, chunk]);
+        if (buffer.length > MAX_LINE_BYTES) {
+          onError?.(new Error("inbox line exceeds cap; dropping connection"));
+          socket.destroy();
+          buffer = Buffer.alloc(0);
+          return;
+        }
         let idx: number;
         while ((idx = buffer.indexOf(LINE_SPLIT)) !== -1) {
           const lineBytes = buffer.subarray(0, idx);
