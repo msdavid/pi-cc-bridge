@@ -1,5 +1,12 @@
 # pi-cc-bridge
 
+![version](https://img.shields.io/badge/version-0.3.0-blue)
+![license](https://img.shields.io/badge/license-MIT-green)
+![node](https://img.shields.io/badge/node-%E2%89%A520.6-brightgreen)
+![platform](https://img.shields.io/badge/platform-linux-lightgrey)
+![Claude Code](https://img.shields.io/badge/Claude_Code-%E2%89%A52.1.224-orange)
+![pi-intercom](https://img.shields.io/badge/pi--intercom-%E2%89%A50.17-purple)
+
 > I use both Claude Code and pi, and I run coordinators and supervisors across
 > multiple sessions on both. I wanted them talking to each other, so I built
 > this extension: it interconnects them using Claude Code's own inter-session
@@ -27,6 +34,16 @@ pi sessions ⇄ pi-intercom broker ⇄ [pi-cc-bridge daemon] ⇄ CC inbox socket
 Both wire directions were verified live against Claude Code 2.1.296 and
 pi-intercom 0.17.0; see `docs/DESIGN.md` for the captured protocol and
 `docs/probes/` for the probe transcripts.
+
+## It looks like this
+
+Claude Code sees your pi sessions (`pi-*` — here the `pi-bridge` funnel and the
+contact-driven `pi-deploy-coordinator` holder); pi sees every live Claude Code
+session as `claude:<name>`:
+
+| Claude Code — `/list-agents` | pi — `/intercom` |
+| --- | --- |
+| ![Claude Code /list-agents](docs/screenshots/cc-list-agents.png) | ![pi /intercom](docs/screenshots/pi-intercom-list.png) |
 
 ## Install (pi package)
 
