@@ -1,5 +1,14 @@
 # pi-cc-bridge
 
+> I use both Claude Code and pi, and I run coordinators and supervisors across
+> multiple sessions on both. I wanted them talking to each other, so I built
+> this extension: it interconnects them using Claude Code's own inter-session
+> messaging protocol and the pi-intercom extension — with **no modifications**
+> to either tool. Just install it, and your pi and Claude Code sessions talk
+> to each other.
+>
+> — mauro
+
 Bridge [pi-intercom](https://github.com/nicobailon/pi-intercom) and
 [Claude Code cross-session messaging](https://code.claude.com/docs/en/cross-session-messaging):
 pi sessions and Claude Code sessions appear as native peers to each other.
