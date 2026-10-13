@@ -34,3 +34,15 @@ saw — a gateway API would make that cleaner.
 
 Happy to send the bridge source and the protocol captures we archived (both wire
 directions verified live against Claude Code 2.1.296) if useful.
+
+
+## Appendix: observed bug worth a separate issue (not part of the bridge asks)
+
+**Tool validation error doesn't echo received parameters** — observed 2026-10-13 on
+pi-intercom 0.17.0 with z-ai/glm-5.3-flash via OpenRouter. The model repeatedly emitted
+`intercom` send calls missing the `to` parameter (action + message only); the tool
+replied `"Missing 'to' or 'cwd', or missing 'message' parameter"` every time, and the
+model never self-corrected. Suggested improvement: when send validation fails, include
+the received parameter keys (and the missing ones) in the error, e.g.
+`missing: to; received: action, message` — a model reading that fixes the call in one
+retry instead of looping. Transcript evidence available on request.
