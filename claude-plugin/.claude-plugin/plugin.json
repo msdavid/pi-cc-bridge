@@ -2,7 +2,7 @@
   "name": "pi-cc-bridge",
   "displayName": "pi-cc-bridge",
   "version": "0.3.0",
-  "description": "Message pi coding-agent sessions through the pi-cc-bridge peer: pi sessions appear in /list-agents as pi-bridge.",
+  "description": "Message pi coding-agent sessions from Claude Code: pi sessions appear in /list-agents as pi-* entries (SendMessage them directly). Part of pi-cc-bridge, the pi <-> Claude Code session bridge.",
   "author": {
     "name": "mauro"
   },

@@ -1,7 +1,7 @@
 {
   "name": "pi-cc-bridge",
   "version": "0.3.0",
-  "description": "Connect pi coding-agent sessions and Claude Code sessions: multi-agent coordination across both tools via pi-intercom and Claude Code cross-session messaging \u2014 coordinators, supervisors and subagents talk to each other with zero modifications.",
+  "description": "Session-to-session messaging between pi coding-agent and Claude Code: your pi sessions appear in Claude Code /list-agents and your Claude Code sessions appear in pi's intercom list. Multi-agent coordination across both tools \u2014 coordinators, supervisors, subagents \u2014 via pi-intercom and the Claude Code cross-session protocol. No modifications to either tool.",
   "type": "module",
   "license": "MIT",
   "keywords": [

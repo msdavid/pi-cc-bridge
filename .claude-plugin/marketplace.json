@@ -8,7 +8,7 @@
     {
       "name": "pi-cc-bridge",
       "source": "./claude-plugin",
-      "description": "Message pi coding-agent sessions through the pi-cc-bridge peer: pi sessions appear in /list-agents as pi-<alias>.",
+      "description": "Message pi coding-agent sessions from Claude Code: pi sessions appear in /list-agents as pi-* entries. Part of pi-cc-bridge, the pi <-> Claude Code session bridge.",
       "keywords": [
         "pi",
         "pi-intercom",
