@@ -10,7 +10,13 @@
   "keywords": [
     "pi",
     "pi-intercom",
+    "pi-coding-agent",
+    "claude-code",
+    "multi-agent",
+    "cross-session",
+    "coordination",
     "bridge",
-    "cross-session"
+    "sessions",
+    "interoperability"
   ]
 }
