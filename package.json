@@ -39,7 +39,8 @@
   "pi": {
     "extensions": [
       "./extensions/index.ts"
-    ]
+    ],
+    "image": "./docs/screenshots/cc-list-agents.png"
   },
   "bin": {
     "pi-cc-bridge": "./bin/pi-cc-bridge.mjs"

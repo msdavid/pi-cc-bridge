@@ -48,13 +48,6 @@ session as `claude:<name>`:
 | --- | --- |
 | ![Claude Code /list-agents](docs/screenshots/cc-list-agents.png) | ![pi /intercom](docs/screenshots/pi-intercom-list.png) |
 
-## Credits
-
-The pi side of this bridge exists because of
-[pi-intercom](https://github.com/nicobailon/pi-intercom) by **nicobailon** — the bridge
-speaks its broker protocol, and its clean, client-asserted registration meant this could
-be a companion package rather than a fork. Zero changes were needed on pi-intercom's side.
-
 ## Install (pi package)
 
 ```bash
@@ -89,6 +82,13 @@ or copy it into CC's plugin location, or add this repo as a marketplace:
 ```
 
 Validate: `claude plugin validate ~/projects/pi-cc-bridge/claude-plugin`.
+
+## Credits
+
+The pi side of this bridge exists because of
+[pi-intercom](https://github.com/nicobailon/pi-intercom) by **nicobailon** — the bridge
+speaks its broker protocol, and its clean, client-asserted registration meant this could
+be a companion package rather than a fork. Zero changes were needed on pi-intercom's side.
 
 ## Configuration
 
