@@ -157,3 +157,7 @@ cross-machine CC messaging (Remote Control relay) is out of scope; the pi→CC
 direction inherits CC's inbound controls verbatim (bypass-mode CC sessions
 will hold `prompting`-class messages for user approval — set
 `crossSessionInbound: "accept"` on unattended CC workers).
+
+---
+
+**Keywords:** pi coding agent, Claude Code, pi-intercom, multi-agent coordination, cross-session messaging, agent bridge, coordinators, supervisors, subagents, agent teams, inter-agent communication, session orchestration, interoperability
