@@ -54,8 +54,6 @@ The pi side of this bridge exists because of
 [pi-intercom](https://github.com/nicobailon/pi-intercom) by **nicobailon** — the bridge
 speaks its broker protocol, and its clean, client-asserted registration meant this could
 be a companion package rather than a fork. Zero changes were needed on pi-intercom's side.
-Thanks as well to the [pi](https://github.com/earendil-works/pi) and
-[Claude Code](https://claude.com/claude-code) teams for the two harnesses being bridged.
 
 ## Install (pi package)
 
