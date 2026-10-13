@@ -20,6 +20,9 @@ Bridge [pi-intercom](https://github.com/nicobailon/pi-intercom) and
 [Claude Code cross-session messaging](https://code.claude.com/docs/en/cross-session-messaging):
 pi sessions and Claude Code sessions appear as native peers to each other.
 
+**Requires [pi-intercom](https://github.com/nicobailon/pi-intercom) — it is mandatory,
+not optional. The bridge speaks its broker protocol; without it, nothing delivers.
+
 ```
 pi sessions ⇄ pi-intercom broker ⇄ [pi-cc-bridge daemon] ⇄ CC inbox sockets ⇄ CC sessions
 ```
@@ -54,23 +57,22 @@ be a companion package rather than a fork. Zero changes were needed on pi-interc
 Thanks as well to the [pi](https://github.com/earendil-works/pi) and
 [Claude Code](https://claude.com/claude-code) teams for the two harnesses being bridged.
 
-## Prerequisite
-
-The bridge rides on [pi-intercom](https://github.com/nicobailon/pi-intercom) — install it
-first if you haven't: `pi install npm:pi-intercom`. The bridge does not install it for you;
-without it the daemon stays up and keeps retrying, and `/cc-bridge status` flags the
-missing broker.
-
 ## Install (pi package)
 
 ```bash
-pi install npm:pi-cc-bridge     # once published
-# or locally:
-pi install git:file:///home/mauro/projects/pi-cc-bridge
+pi install npm:pi-intercom       # 1. mandatory prerequisite — skip only if already installed
+pi install npm:pi-cc-bridge      # 2. the bridge (npm once published; locally:
+                                 #    pi install /home/mauro/projects/pi-cc-bridge)
 ```
-
 Then restart pi. The extension starts the daemon (idempotent, one per machine)
 and adds `/cc-bridge [status|start|stop]`.
+
+The bridge does not auto-install pi-intercom for you; without it the daemon stays
+up and keeps retrying, and `/cc-bridge status` flags the missing broker.
+
+```bash
+pi install npm:pi-cc-bridge     # once published
+
 
 ## Install the Claude Code side (optional but recommended)
 
