@@ -45,6 +45,13 @@ session as `claude:<name>`:
 | --- | --- |
 | ![Claude Code /list-agents](docs/screenshots/cc-list-agents.png) | ![pi /intercom](docs/screenshots/pi-intercom-list.png) |
 
+## Prerequisite
+
+The bridge rides on [pi-intercom](https://github.com/nicobailon/pi-intercom) — install it
+first if you haven't: `pi install npm:pi-intercom`. The bridge does not install it for you;
+without it the daemon stays up and keeps retrying, and `/cc-bridge status` flags the
+missing broker.
+
 ## Install (pi package)
 
 ```bash

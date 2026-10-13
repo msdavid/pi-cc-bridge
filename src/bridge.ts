@@ -288,7 +288,15 @@ export class Bridge {
           livenessIntervalMs: 10_000,
         })
         .catch(error => {
-          this.log(`peer ${name} register failed: ${(error as Error).message}`);
+          const msg = (error as Error).message;
+          if (msg.includes("no pi-intercom broker endpoint")) {
+            this.logOnce(
+              "no-broker",
+              `PREREQUISITE MISSING: no pi-intercom broker at ${this.agentDir()}/intercom/broker.sock — run \`pi install npm:pi-intercom\` and restart pi. The bridge keeps retrying; CC\u2194pi delivery stays down until then.`,
+            );
+          } else {
+            this.log(`peer ${name} register failed: ${msg}`);
+          }
           if (this.peers.get(record.sessionId)?.client === client) this.peers.delete(record.sessionId);
           this.retryAt.set(record.sessionId, Date.now() + 5_000);
           client.close();

@@ -126,8 +126,11 @@ export default function piCcBridgeExtension(pi: import("@earendil-works/pi-codin
       } catch {
         /* no held dir */
       }
+      const agentDir = process.env.PI_CODING_AGENT_DIR?.trim() || join(process.env.HOME ?? "", ".pi", "agent");
+      const broker = join(agentDir, "intercom", "broker.sock");
+      const intercom = existsSync(broker) ? "OK" : "MISSING — run: pi install npm:pi-intercom";
       ctx.ui.notify(
-        `pi-cc-bridge daemon: ${pid ? `running (pid ${pid})` : "not running"}\nstate dir: ${stateDir()}\nheld messages: ${held}`,
+        `pi-cc-bridge daemon: ${pid ? `running (pid ${pid})` : "not running"}\npi-intercom broker: ${intercom}\nstate dir: ${stateDir()}\nheld messages: ${held}`,
         "info",
       );
     },
