@@ -1,5 +1,8 @@
 # pi-cc-bridge — Design
 
+> Built on [pi-intercom](https://github.com/nicobailon/pi-intercom) by nicobailon —
+> this bridge only speaks its protocol; pi-intercom itself required zero changes.
+
 Bridge **pi-intercom** (pi sessions) and **Claude Code cross-session messaging** (CC sessions)
 so both sides appear as native peers to each other.
 
